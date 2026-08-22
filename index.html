@@ -285,11 +285,15 @@
   #app-root .chip.st-plan { color: var(--pulse-text); background: rgba(0,215,111,0.12); border-color: var(--pulse); }
 
   .av {
+    position: relative;
     flex: none; display: grid; place-items: center; overflow: hidden;
     background-size: cover; background-position: center; color: #fff;
     font-weight: 700; letter-spacing: -0.3px; text-transform: uppercase;
     box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35), 0 2px 6px rgba(0,0,0,0.18);
   }
+  .pv-fill { position: absolute; inset: -30%; filter: blur(10px) saturate(1.5); }
+  .pv-blur { display: inline-block; filter: blur(5px); user-select: none; pointer-events: none; }
+  #privacyBtn.is-on { color: var(--btn-text); background: var(--btn-fill); border-color: transparent; }
 
   /* ---------- calendars ---------- */
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 18px; }
@@ -539,6 +543,7 @@
       <button class="todaybtn" id="jumpToday">Сегодня</button>
     </div>
 
+    <button class="btn-ghost" id="privacyBtn" aria-label="Скрыть названия и аватарки" title="Демо-режим"></button>
     <button class="btn-ghost" id="themeBtn" aria-label="Сменить тему" title="Сменить тему"></button>
 
     <button class="btn-primary" id="addBtn">
@@ -641,6 +646,57 @@
 
   $('themeBtn').onclick = function () { setTheme(currentTheme() === 'dark' ? 'light' : 'dark', true); };
   paintThemeButton();
+
+  /* ---------- демо-режим (для съёмки) ---------- */
+  var EYE = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/></svg>';
+  var EYE_OFF = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.6 5.7A9.9 9.9 0 0112 5.5c6.4 0 10 6.5 10 6.5a17 17 0 01-3.3 4M6.2 6.2A16.6 16.6 0 002 12s3.6 6.5 10 6.5c1.7 0 3.2-.4 4.5-1"/><path d="M10 10a2.8 2.8 0 004 4"/><path d="M3 3l18 18"/></svg>';
+
+  /* яркие пары, ничего общего с реальными аватарками */
+  var MASKC = ['#ffd93d,#ff9a3d', '#4ade80,#15a34a', '#c084fc,#7c3aed', '#ff6b6b,#c81d3a',
+               '#38bdf8,#2563eb', '#fb7185,#e11d67', '#2dd4bf,#0d9488', '#fbbf24,#ea580c',
+               '#a3e635,#4d7c0f', '#f472b6,#9d174d'];
+  var LETTERS = 'абвгдежзиклмнопрстуфхцчшыэюя';
+
+  var privacy = false;
+  var mask = {};
+
+  function maskOf(ch) {
+    if (!mask[ch.id]) {
+      var n = Math.max(7, Math.min(15, (ch.name || '').length));
+      var s = '';
+      for (var i = 0; i < n; i++) s += LETTERS[Math.floor(Math.random() * LETTERS.length)];
+      mask[ch.id] = { grad: MASKC[Math.floor(Math.random() * MASKC.length)], name: s };
+    }
+    return mask[ch.id];
+  }
+
+  function avBox(ch, cls) {
+    if (privacy) {
+      var g = maskOf(ch).grad.split(',');
+      return '<span class="av ' + cls + '"><i class="pv-fill" style="background-image:linear-gradient(140deg,' + g[0] + ',' + g[1] + ')"></i></span>';
+    }
+    return '<span class="av ' + cls + '" style="' + avStyle(ch) + '">' + esc(initials(ch)) + '</span>';
+  }
+
+  function nameHTML(ch) {
+    return privacy ? '<span class="pv-blur">' + esc(maskOf(ch).name) + '</span>' : esc(ch.name);
+  }
+
+  function paintPrivacyButton() {
+    var b = $('privacyBtn');
+    b.innerHTML = privacy ? EYE_OFF : EYE;
+    b.classList.toggle('is-on', privacy);
+    b.setAttribute('title', privacy ? 'Показать названия' : 'Скрыть названия для съёмки');
+  }
+
+  $('privacyBtn').onclick = function () {
+    privacy = !privacy;
+    if (privacy) mask = {};          // новые случайные цвета при каждом включении
+    paintPrivacyButton();
+    render();
+    toast(privacy ? 'Демо-режим: названия и аватарки скрыты' : 'Демо-режим выключен');
+  };
+  paintPrivacyButton();
 
   var ACCENTS = ['#ff5f6d,#ffc371', '#00d2ff,#3a7bd5', '#a86bff,#f857a6', '#00dd76,#0aa9a0', '#ff8a3d,#ff5f6d', '#4b5bff,#9a4bff'];
   var WD = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
@@ -775,7 +831,7 @@
     $('chips').innerHTML = state.channels.map(function (c) {
       var s = markOf(c, TODAY);
       return '<button class="chip ' + (s ? 'st-' + s : '') + '" data-chip="' + c.id + '">' +
-        '<span class="av" style="' + avStyle(c) + '">' + esc(initials(c)) + '</span>' + esc(c.name) + '</button>';
+        avBox(c, '') + nameHTML(c) + '</button>';
     }).join('');
 
     var offset = (new Date(y, m, 1).getDay() + 6) % 7;
@@ -792,8 +848,8 @@
       }
       return '<article class="card" style="animation-delay:' + (i * 45) + 'ms">' +
         '<div class="card-head">' +
-          '<div class="av" style="' + avStyle(ch) + '">' + esc(initials(ch)) + '</div>' +
-          '<div class="card-id"><b>' + esc(ch.name) + '</b>' +
+          avBox(ch, '') +
+          '<div class="card-id"><b>' + nameHTML(ch) + '</b>' +
             '<div class="streakline ' + (sk > 0 ? 'hot' : '') + '">' + (sk > 0 ? FLAME : '') +
             (sk > 0 ? 'Серия: ' + sk + ' ' + plural(sk, ['день','дня','дней']) : 'Серии пока нет') + '</div>' +
           '</div>' +
@@ -861,7 +917,7 @@
 
     box.innerHTML =
       '<div class="chooser-head"><b>' + d.getDate() + ' ' + MONTHS[d.getMonth()] + ', ' + DOWFULL[d.getDay()] + '</b>' +
-      '<span>' + esc(ch.name) + '</span></div>' + main +
+      '<span>' + nameHTML(ch) + '</span></div>' + main +
       '<div class="opt-row">' +
         '<button type="button" class="' + (cur === 'rest' ? 'is-cur' : '') + '" data-set="rest">Выходной</button>' +
         '<button type="button" data-set="clear">Убрать отметку</button>' +
