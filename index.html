@@ -282,6 +282,7 @@
   #app-root .chip.st-done { color: #fff; background: linear-gradient(180deg, #1ceb85, #00b25b); border-color: rgba(255,255,255,0.4); box-shadow: 0 6px 16px rgba(0,178,91,0.32); }
   #app-root .chip.st-miss { color: #fff; background: linear-gradient(180deg, #ff6060, #e02424); border-color: rgba(255,255,255,0.4); box-shadow: 0 6px 16px rgba(224,36,36,0.3); }
   #app-root .chip.st-rest { color: #fff; background: linear-gradient(180deg, var(--rest-a), var(--rest-b)); border-color: rgba(255,255,255,0.3); }
+  #app-root .chip.st-plan { color: var(--pulse-text); background: rgba(0,215,111,0.12); border-color: var(--pulse); }
 
   .av {
     flex: none; display: grid; place-items: center; overflow: hidden;
@@ -359,6 +360,13 @@
     background-image: linear-gradient(168deg, var(--rest-a) 0%, var(--rest-b) 100%);
     border-color: rgba(255,255,255,0.28);
   }
+  #app-root .day.st-plan {
+    color: var(--pulse-text); font-weight: 700;
+    background-color: transparent;
+    background-image: linear-gradient(168deg, rgba(0,215,111,0.2) 0%, rgba(0,178,91,0.07) 100%);
+    border: 1.5px solid var(--pulse);
+  }
+  #app-root .day.is-today.st-plan { box-shadow: 0 0 0 2px var(--ring-gap), 0 0 0 4px var(--ring); }
   #app-root .day.is-today         { box-shadow: 0 0 0 2.5px var(--ring); }
   #app-root .day.is-today.st-done { box-shadow: 0 0 0 2px var(--ring-gap), 0 0 0 4px var(--ring), 0 0 18px rgba(0,215,111,0.45); }
   #app-root .day.is-today.st-miss { box-shadow: 0 0 0 2px var(--ring-gap), 0 0 0 4px var(--ring); }
@@ -399,6 +407,7 @@
   .opt.is-cur .tick { opacity: 1; }
   .opt-yes { background: linear-gradient(180deg, #1ceb85, #00b25b); box-shadow: 0 6px 16px rgba(0,178,91,0.34); }
   .opt-no  { background: linear-gradient(180deg, #ff6060, #e02424); box-shadow: 0 6px 16px rgba(224,36,36,0.3); }
+  .opt-plan { color: var(--pulse-text); background: rgba(0,215,111,0.13); box-shadow: inset 0 0 0 1.5px var(--pulse); }
   .opt-row { display: flex; gap: 7px; }
   .opt-row button {
     flex: 1; height: 38px; border-radius: 12px; font-size: 12.5px; font-weight: 620;
@@ -422,6 +431,7 @@
   .lg-done { background: #00d76f; }
   .lg-miss { background: #ff3b3b; }
   .lg-rest { background: var(--rest-b); }
+  .lg-plan { background: rgba(0,215,111,0.18); border: 2px solid #00d76f; }
   .lg-today { background: var(--day-pending-bg); box-shadow: 0 0 0 2px var(--ring); }
 
   /* ---------- modal ---------- */
@@ -565,10 +575,11 @@
 
   <div class="legend" id="legend" style="display:none">
     <span><i class="lg-done"></i>Выложил</span>
+    <span><i class="lg-plan"></i>В плане</span>
     <span><i class="lg-miss"></i>Пропустил</span>
     <span><i class="lg-rest"></i>Выходной</span>
     <span><i class="lg-today"></i>Сегодня</span>
-    <span>Нажмите на день и выберите «Выложил» или «Не выложил»</span>
+    <span>Будущие дни тоже кликаются — их можно планировать</span>
   </div>
 </div>
 
@@ -678,6 +689,10 @@
 
   function stateOf(ch, dk) {
     var m = markOf(ch, dk);
+    if (m === 'plan') {
+      /* план в силе, пока день не прошёл; прошедший неподтверждённый план = пропуск */
+      return dk < TODAY ? 'miss' : 'plan';
+    }
     if (m) return m;
     if (dk > TODAY) return 'future';
     if (dk < ch.start) return 'before';
@@ -706,13 +721,15 @@
   }
 
   function monthStats(ch, y, m) {
-    var last = new Date(y, m + 1, 0).getDate(), done = 0, miss = 0;
+    var last = new Date(y, m + 1, 0).getDate(), done = 0, miss = 0, ahead = 0;
     for (var d = 1; d <= last; d++) {
-      var s = stateOf(ch, y + '-' + pad(m + 1) + '-' + pad(d));
+      var dk = y + '-' + pad(m + 1) + '-' + pad(d);
+      var s = stateOf(ch, dk);
+      if (dk > TODAY) { if (s === 'done' || s === 'plan') ahead++; continue; }
       if (s === 'done') done++;
       else if (s === 'miss') miss++;
     }
-    return { done: done, miss: miss, pct: (done + miss) ? Math.round(done / (done + miss) * 100) : 0 };
+    return { done: done, miss: miss, ahead: ahead, pct: (done + miss) ? Math.round(done / (done + miss) * 100) : 0 };
   }
 
   function plural(n, f) {
@@ -770,9 +787,8 @@
       for (var d = 1; d <= lastDay; d++) {
         var dk = y + '-' + pad(m + 1) + '-' + pad(d);
         var s = stateOf(ch, dk);
-        var cls = 'day st-' + s + (s !== 'future' ? ' tap' : '') + (dk === TODAY ? ' is-today' : '');
-        cells += '<button class="' + cls + '" data-ch="' + ch.id + '" data-d="' + dk + '"' +
-                 (s === 'future' ? ' disabled' : '') + '>' + d + '</button>';
+        var cls = 'day st-' + s + ' tap' + (dk === TODAY ? ' is-today' : '');
+        cells += '<button class="' + cls + '" data-ch="' + ch.id + '" data-d="' + dk + '">' + d + '</button>';
       }
       return '<article class="card" style="animation-delay:' + (i * 45) + 'ms">' +
         '<div class="card-head">' +
@@ -793,6 +809,7 @@
         '<div class="card-foot">' +
           '<div class="stat g"><b>' + st.done + '</b> выложено</div>' +
           '<div class="stat r"><b>' + st.miss + '</b> ' + plural(st.miss, ['пропуск','пропуска','пропусков']) + '</div>' +
+          (st.ahead ? '<div class="stat g"><b>' + st.ahead + '</b> в плане</div>' : '') +
           '<div class="bar" title="' + st.pct + '%"><i style="width:' + st.pct + '%"></i></div>' +
         '</div></article>';
     }).join('');
@@ -819,20 +836,32 @@
     for (var i = 0; i < state.channels.length; i++) if (state.channels[i].id === cell.dataset.ch) ch = state.channels[i];
     if (!ch) return;
     var dk = cell.dataset.d;
-    if (dk > TODAY) return;
-
     var cur = markOf(ch, dk), d = parse(dk), box = $('chooser');
+    var TICK = '<svg class="tick" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="5"/></svg>';
+    var main;
+
+    if (dk > TODAY) {
+      /* будущее: планируем или отмечаем, что ролик уже готов и стоит в отложке */
+      main =
+        '<button type="button" class="opt opt-yes ' + (cur === 'done' ? 'is-cur' : '') + '" data-set="done">' +
+          '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>' +
+          '<span>Готово, в отложке</span>' + TICK + '</button>' +
+        '<button type="button" class="opt opt-plan ' + (cur === 'plan' ? 'is-cur' : '') + '" data-set="plan">' +
+          '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M8 2.6v4M16 2.6v4M3.5 10h17"/></svg>' +
+          '<span>Запланировано</span>' + TICK + '</button>';
+    } else {
+      main =
+        '<button type="button" class="opt opt-yes ' + (cur === 'done' ? 'is-cur' : '') + '" data-set="done">' +
+          '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>' +
+          '<span>Выложил</span>' + TICK + '</button>' +
+        '<button type="button" class="opt opt-no ' + (cur === 'miss' ? 'is-cur' : '') + '" data-set="miss">' +
+          '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>' +
+          '<span>Не выложил</span>' + TICK + '</button>';
+    }
+
     box.innerHTML =
       '<div class="chooser-head"><b>' + d.getDate() + ' ' + MONTHS[d.getMonth()] + ', ' + DOWFULL[d.getDay()] + '</b>' +
-      '<span>' + esc(ch.name) + '</span></div>' +
-      '<button type="button" class="opt opt-yes ' + (cur === 'done' ? 'is-cur' : '') + '" data-set="done">' +
-        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>' +
-        '<span>Выложил</span>' +
-        '<svg class="tick" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="5"/></svg></button>' +
-      '<button type="button" class="opt opt-no ' + (cur === 'miss' ? 'is-cur' : '') + '" data-set="miss">' +
-        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>' +
-        '<span>Не выложил</span>' +
-        '<svg class="tick" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="5"/></svg></button>' +
+      '<span>' + esc(ch.name) + '</span></div>' + main +
       '<div class="opt-row">' +
         '<button type="button" class="' + (cur === 'rest' ? 'is-cur' : '') + '" data-set="rest">Выходной</button>' +
         '<button type="button" data-set="clear">Убрать отметку</button>' +
